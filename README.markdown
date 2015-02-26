@@ -39,7 +39,7 @@ Following is an example of LED blinking with PIC12F683 micro controller. `init` 
             `(loop ,r (mdelay1))
             `(loop ,q (loop ,r (mdelay1))))))
 
-`pic-compile` function compiles and outputs the complete assembly for the PIC functions to standard output. The output assembly is expected to be assembled with Microchip's MPASM assembler.
+Then `pic-compile` function compiles and outputs the complete assembly for the PIC functions to standard output. The output assembly is expected to be assembled with Microchip's MPASM assembler.
 
     PIC> (pic-compile)
         INCLUDE"p12f683.inc"
@@ -292,7 +292,7 @@ On calling a function, its parameters are stored to be passed in the input pseud
 
 ### Software stack
 
-The compiler uses a software stack for saving the values in local pseudo-registers. The term `software stack` means distinguishing it from the micro controller's hardware call stack. It begins from the address `STK` upwords and the stack pointer is stored in the address `SP`. For pushing a content in W register on top of the stack, `_PUSH_STACK` assembler macro does the work. Conversely, `_POP_STACK` assembler macro pops back a value on top of the stack into W register. Currently, saving values in local pseudo-registers is the only usage of the software stack.
+The compiler uses a software stack for saving the values in local pseudo-registers. The term 'software stack' means distinguishing it from the micro controller's hardware stack. It begins from the address `STK` upwords and the stack pointer is stored in the address `SP`. For pushing a content in W register on top of the stack, `_PUSH_STACK` assembler macro does the work. Conversely, `_POP_STACK` assembler macro pops back a value on top of the stack into W register. Currently, saving values in local pseudo-registers is the only usage of the software stack.
 
 ### Why no closures?
 
