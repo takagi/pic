@@ -8,6 +8,8 @@ Following is an example of LED blinking with PIC12F683 micro controller. `init` 
 
 `mdelay1` function and `mdelay` macro are for delaying. Note that since 8-bit PIC handles only 8-bit unsigned integers, nested loops are needed for delaying more than 255 msec (950 msec here). `progn` and `loop` are predefined macros for the compiler.
 
+`pic-compile` function compiles and outputs the complete assembly for the PIC functions to standard output. The output assembly is expected to be assembled with Microchip's MPASM assembler.
+
     (defpic init ()
       (progn
         (setreg :gpio #x0)                  ; clera GP0-5
@@ -38,6 +40,22 @@ Following is an example of LED blinking with PIC12F683 micro controller. `init` 
         (if (= q 0)
             `(loop ,r (mdelay1))
             `(loop ,q (loop ,r (mdelay1))))))
+
+    (pic-disassemble)
+        INCLUDE"p12f683.inc"
+        list p=12f683
+
+        __CONFIG _CP_OFF & _CPD_OFF & _WDT_OFF & _BOD_ON & _IESO_OFF& _PWRTE_ON & _INTOSCIO & _MCLRE_OFF
+
+        CBLOCK  020h
+        L0,L1,L2,L3,L4,L5,L6,L7 ; local registers
+        I0,I1,I2,I3,I4,I5,I6,I7 ; input registers
+        SP,STMP,STK             ; stack registers
+        ENDC
+
+        ORG 0
+        GOTO    MAIN
+        ...
 
 ## Installation
 
