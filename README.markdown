@@ -41,7 +41,7 @@ Following is an example of LED blinking with PIC12F683 micro controller. `init` 
 
 `pic-compile` function compiles and outputs the complete assembly for the PIC functions to standard output. The output assembly is expected to be assembled with Microchip's MPASM assembler.
 
-    PIC> (pic-disassemble)
+    PIC> (pic-compile)
         INCLUDE"p12f683.inc"
         list p=12f683
     
