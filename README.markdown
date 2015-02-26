@@ -4,7 +4,9 @@ A native compiler for 8-bit PIC micro controllers written in Common Lisp. The ho
 
 ## Usage
 
-Following is an example of LED blinking with PIC12F683 micro controller. `init` function is one of the compiler's special functions, where the micro controller's SFR(Special Function Registers) are initialized. Following `main` function is also the compiler's special function and program's main routine is executed here. `mdelay1` function and `mdelay` macro are for delaying. Note that since 8-bit PIC handles only 8-bit integers, nested loops are needed for delaying more than 255 msec (950 msec here). `progn` and `loop` are predefined macros for the compiler.
+Following is an example of LED blinking with PIC12F683 micro controller. `init` function is one of the compiler's special functions, where the micro controller's SFR(Special Function Registers) are initialized. Following `main` function is also the compiler's special function and program's main routine is executed here.
+
+`mdelay1` function and `mdelay` macro are for delaying. Note that since 8-bit PIC handles only 8-bit unsigned integers, nested loops are needed for delaying more than 255 msec (950 msec here). `progn` and `loop` are predefined macros for the compiler.
 
     (defpic init ()
       (progn
@@ -58,13 +60,13 @@ Defines a PIC function. At least, `main` special function must be defined. `pic-
 
     DEFPICMACRO name arguments form
 
-Defines a PIC macro. `pic-macroexpand` returns an expansion for a defined PIC macro.
+Defines a PIC macro. `pic-macroexpand` returns an expansion for a PIC macro form.
 
 ### [Function] pic-compile
 
     PIC-COMPILE
 
-Compiles and outputs the complete assembly for PIC functions defined with `defpic` macro to `*standard-output*`. The output assembly is to be expected to be assembled with Microchip's MPASM assembler.
+Compiles and outputs the complete assembly for PIC functions defined with `defpic` macro to `*standard-output*`. The output assembly is expected to be assembled with Microchip's MPASM assembler.
 
 ### [Function] pic-disassemble
 
@@ -198,11 +200,15 @@ Processes `expression` for `n` times. Actually a loop form is expanded into a lo
 
 #### [PIC-Macro] setbank0
 
+    SETBANK0
+
 Sets the current bank to bank 0.
 
     (setbank0) ==> (setreg :status #x00)
 
 #### [PIC-Macro] setbank1
+
+    SETBANK1
 
 Sets the current bank to bank 1.
 
@@ -242,6 +248,8 @@ Required. `main` is called next to `init` special function. It must have no argu
 
 ### [PIC-Function] intr
 
+    INTR
+
 Optional. `intr` is called when an interruption occurs. It must have no arguments. Expected is that some operations to accept interruptions are done in `intr` special function. It naturally returns with `RETFIE` instruction to the address where the interruption has occured.
 
     (defpic intr ()
@@ -251,24 +259,24 @@ Optional. `intr` is called when an interruption occurs. It must have no argument
 
 ### Overview
 
-The host language is a The host language is a pretty small subset of ML-like language and the target language is 8-bit PIC micro controller assembly. Common Lisp is the compiler language. The overall design of the compiler is based on [MinCaml](http://esumii.github.io/min-caml/).
+The host language is a The host language is a pretty small subset of ML-like language and the target language is 8-bit PIC micro controller assembly. Common Lisp is the compiler language. Overall design of the compiler is based on [MinCaml](http://esumii.github.io/min-caml/).
 
 ### Calling convention
 
 The compiler uses the following 'pseudo-registers' allocated in a particular part in the data memory for function calling.
 
-* input pseudo-registers (`I0-I7`)
-* local pseudo-registers (`L0-L7`)
+* input pseudo-registers `I0-I7`
+* local pseudo-registers `L0-L7`
 
-On calling a function, its parameters are stored to be passed in the input pseudo-registers. Return values are stored in W register. A function can freely use the local pseudo-registers. To avoid destroying the values in the caller function's 'alive' local pseudo-registers, they are saved in the software stack before calling. After returning from the callee function, they are restored. Here 'alive' means the registers are used after returning from the callee function. About the software stack, see the next section.
+On calling a function, its parameters are stored to be passed in the input pseudo-registers. Return values are stored in W register. Functions can use the local pseudo-registers freely for themselves. To avoid destroying the values in a caller function's 'alive' local pseudo-registers, they are saved in the software stack before calling. After returning from the callee function, they are restored. Here 'alive' means the registers are used after returning from the callee function. About the software stack, see the next section.
 
 ### Software stack
 
-The compiler uses a software stack for saving the values in the local pseudo-registers. It begins upwords from the address `STK` and the stack pointer is stored in the address `SP`. For pushing the content in W register on top of the stack, `_PUSH_STACK` assembler macro does the work. Conversely, `_POP_STACK` assembler macro pops back the value on top of the stack into W register. Currently, saving values in the local pseudo-registers is the only usage of the software stack.
+The compiler uses a software stack for saving the values in local pseudo-registers. The term `software stack` means distinguishing it from the micro controller's hardware call stack. It begins from the address `STK` upwords and the stack pointer is stored in the address `SP`. For pushing a content in W register on top of the stack, `_PUSH_STACK` assembler macro does the work. Conversely, `_POP_STACK` assembler macro pops back a value on top of the stack into W register. Currently, saving values in local pseudo-registers is the only usage of the software stack.
 
 ### Why no closures?
 
-To adopt closures, calling to indirect address is required. However 8-bit PIC assembly's `CALL` instruction accepts only immediates for its destination address. Although calling to indirect address is possible with writing directly into the program counter, it is followed by some intricates:
+To adopt closures, calling to indirect address is required. However 8-bit PIC assembly's `CALL` instruction accepts only immediates for its destination address. Although calling to indirect address is possible with writing an address directly into the program counter, it is accompanied by the following instricates:
 
 * managing not only `PCL` but `PCLATH`
 * calculating the return address
@@ -279,7 +287,7 @@ Because of them, closures are not adopted for now.
 
 ## Slide
 
-<iframe src="//www.slideshare.net/slideshow/embed_code/45131616" width="425" height="355" frameborder="0" marginwidth="0" marginheight="0" scrolling="no" style="border:1px solid #CCC; border-width:1px; margin-bottom:5px; max-width: 100%;" allowfullscreen> </iframe> <div style="margin-bottom:5px"> <strong> <a href="//www.slideshare.net/masayukitakagi/2015-0225-45131616" title="Lisp Meet Up #25, 8-bit PIC マイコン用ネイティブコンパイラの作成" target="_blank">Lisp Meet Up #25, 8-bit PIC マイコン用ネイティブコンパイラの作成</a> </strong> from <strong><a href="//www.slideshare.net/masayukitakagi" target="_blank">masayukitakagi</a></strong> </div>
+[Lisp Meet Up #25, 8-bit PIC マイコン用ネイティブコンパイラの作成](http://www.slideshare.net/masayukitakagi/2015-0225-45131616)
 
 ## See also
 
