@@ -305,7 +305,7 @@ Because of them, closures are not adopted for now.
 
 ## Slide
 
-[Lisp Meet Up #25, 8-bit PIC マイコン用ネイティブコンパイラの作成](http://www.slideshare.net/masayukitakagi/2015-0225-45131616)
+* [Lisp Meet Up #25, 8-bit PIC マイコン用ネイティブコンパイラの作成](http://www.slideshare.net/masayukitakagi/2015-0225-45131616)
 
 ## See also
 
