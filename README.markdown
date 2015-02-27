@@ -28,7 +28,7 @@ Following is an example of LED blinking with PIC12F683 micro controller. `init` 
         (main)))                            ; repeat
 
     (defpic mdelay1 ()
-      (loop 52                              ; 52 is a magic number to delay
+      (loop 76                              ; 76 is a magic number to delay
         0))                                 ;  for 1 msec
 
     (defpicmacro mdelay (n)

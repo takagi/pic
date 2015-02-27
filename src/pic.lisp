@@ -1185,6 +1185,104 @@
 
 
 ;;;
+;;; Immediates optimization
+;;;
+
+(defun empty-immediates-environment ()
+  nil)
+
+(defun immediates-environment-add (var literal env)
+  (acons var literal env))
+
+(defun immediates-environment-lookup (var env)
+  (cdr (assoc var env)))
+
+(defun alive-variable-p (var expr)
+  (and (member var (flatten-list expr))
+       t))
+
+(defun immediates (env inst)
+  (cond
+    ((let-inst-p inst) (immediates-let env inst))
+    ((letrec-inst-p inst) (immediates-letrec env inst))
+    ((set-inst-p inst) (immediates-set inst))
+    ((mov-inst-p inst) (immediates-mov inst))
+    ((sub-inst-p inst) (immediates-sub env inst))
+    ((ifeq-inst-p inst) (immediates-ifeq env inst))
+    ((setreg-inst-p inst) (immediates-setreg env inst))
+    ((call-inst-p inst) (immediates-call env inst))
+    (t (error "The value ~S is an invalid instruction." inst))))
+
+(defun immediates-let (env inst)
+  (let ((var (let-inst-var inst))
+        (expr (let-inst-expr inst))
+        (body (let-inst-body inst)))
+    (if (set-inst-p expr)
+        (let* ((literal (set-inst-literal expr))
+               (env1 (immediates-environment-add var literal env)))
+          (let ((body1 (immediates env1 body)))
+            (if (alive-variable-p var body1)
+                `(let ((,var ,expr))
+                   ,body1)
+                body1)))
+        (let ((expr1 (immediates env expr))
+              (body1 (immediates env body)))
+          `(let ((,var ,expr1))
+             ,body1)))))
+
+(defun immediates-letrec (env inst)
+  (let ((name (letrec-inst-name inst))
+        (args (letrec-inst-args inst))
+        (expr (letrec-inst-expr inst))
+        (body (letrec-inst-body inst)))
+    (let* ((env0 (empty-immediates-environment))
+           (expr1 (immediates env0 expr)))
+      (let ((body1 (immediates env body)))
+        `(let ((,name ,args ,expr1))
+           ,body1)))))
+
+(defun immediates-set (inst)
+  inst)
+
+(defun immediates-mov (inst)
+  inst)
+
+(defun immediates-sub (env inst)
+  (let ((expr1 (sub-inst-expr1 inst))
+        (expr2 (sub-inst-expr2 inst)))
+    (let ((expr2% (or (immediates-environment-lookup expr2 env)
+                      expr2)))
+      `(sub ,expr1 ,expr2%))))
+
+(defun immediates-ifeq (env inst)
+  (let ((lhs (ifeq-inst-lhs inst))
+        (rhs (ifeq-inst-rhs inst))
+        (then (ifeq-inst-then inst))
+        (else (ifeq-inst-else inst)))
+    (let ((rhs1 (or (immediates-environment-lookup rhs env)
+                    rhs))
+          (then1 (immediates env then))
+          (else1 (immediates env else)))
+      `(ifeq ,lhs ,rhs1 ,then1 ,else1))))
+
+(defun immediates-setreg (env inst)
+  (let ((reg (setreg-inst-reg inst))
+        (expr (setreg-inst-expr inst)))
+    (let ((expr1 (or (immediates-environment-lookup expr env)
+                     expr)))
+      `(setreg ,reg ,expr1))))
+
+(defun immediates-call (env inst)
+  (let ((name (call-inst-name inst))
+        (operands (call-inst-operands inst)))
+    (let ((operands1 (mapcar #'(lambda (operand)
+                                 (or (immediates-environment-lookup operand env)
+                                     operand))
+                             operands)))
+      `(call ,name ,@operands1))))
+
+
+;;;
 ;;; Register assignment
 ;;;
 
@@ -1299,7 +1397,9 @@
   (let ((expr1 (sub-inst-expr1 inst))
         (expr2 (sub-inst-expr2 inst)))
     (let ((expr1% (register-environment-lookup expr1 env))
-          (expr2% (register-environment-lookup expr2 env)))
+          (expr2% (if (literal-p expr2)
+                      expr2
+                      (register-environment-lookup expr2 env))))
       (values `(sub ,expr1% ,expr2%)
               env))))
 
@@ -1309,7 +1409,9 @@
         (then (ifeq-inst-then inst))
         (else (ifeq-inst-else inst)))
     (let ((lhs1 (register-environment-lookup lhs env))
-          (rhs1 (register-environment-lookup rhs env)))
+          (rhs1 (if (literal-p rhs)
+                    rhs
+                    (register-environment-lookup rhs env))))
       (multiple-value-bind (then1 env1) (assign env cont then)
         (multiple-value-bind (else1 env2) (assign env1 cont else)
           (values `(ifeq ,lhs1 ,rhs1 ,then1 ,else1) env2))))))
@@ -1317,7 +1419,9 @@
 (defun assign-setreg (env inst)
   (let ((reg (setreg-inst-reg inst))
         (expr (setreg-inst-expr inst)))
-    (let ((expr1 (register-environment-lookup expr env)))
+    (let ((expr1 (if (literal-p expr)
+                     expr
+                     (register-environment-lookup expr env))))
       (values `(setreg ,reg ,expr1)
               env))))
 
@@ -1325,7 +1429,9 @@
   (let ((name (call-inst-name inst))
         (operands (call-inst-operands inst)))
     (let ((operands1 (mapcar #'(lambda (operand)
-                                 (register-environment-lookup operand env))
+                                 (if (literal-p operand)
+                                     operand
+                                     (register-environment-lookup operand env)))
                              operands)))
       (let ((alive-regs (register-environment-alive-registers cont env)))
         (if alive-regs
@@ -1413,60 +1519,74 @@
 (defun emit-sub (dest inst)
   (let ((expr1 (sub-inst-expr1 inst))
         (expr2 (sub-inst-expr2 inst)))
-    (cl-pattern:match dest
-      ((:non-tail reg) `((movf ,expr2 :w)
-                         (subwf ,expr1 :w)
-                         (movwf ,reg)))
-      (:tail `((movf ,expr2 :w)
-               (subwf ,expr1 :w)
-               (return)))
-      (_ (error "The value ~S is an invalid destination." dest)))))
+    (let ((expr2-insts (if (literal-p expr2)
+                           `((movlw ,expr2))
+                           `((movf ,expr2 :w)))))
+      (cl-pattern:match dest
+        ((:non-tail reg) `(,@expr2-insts
+                           (subwf ,expr1 :w)
+                           (movwf ,reg)))
+        (:tail `(,@expr2-insts
+                 (subwf ,expr1 :w)
+                 (return)))
+        (_ (error "The value ~S is an invalid destination." dest))))))
 
 (defun emit-ifeq (dest inst)
   (let ((lhs (ifeq-inst-lhs inst))
         (rhs (ifeq-inst-rhs inst))
         (then (ifeq-inst-then inst))
         (else (ifeq-inst-else inst)))
-    (let ((then1 (emit dest then))
-          (else1 (emit dest else)))
-      (destructuring-bind (else-lbl end-lbl) (genlbl "ELSE" "END")
-        (cl-pattern:match dest
-          ((:non-tail _) `((movf ,rhs :w)
-                           (subwf ,lhs :w)
-                           (btfsc :status :z)
-                           (goto ,else-lbl)
-                           ,@then1
-                           (goto ,end-lbl)
-                           ,else-lbl
-                           ,@else1
-                           ,end-lbl))
-          (:tail `((movf ,rhs :w)
-                   (subwf ,lhs :w)
-                   (btfsc :status :z)
-                   (goto ,else-lbl)
-                   ,@then1
-                   ,else-lbl
-                   ,@else1))
-          (_ (error "The value ~S is an invalid destination." dest)))))))
+    (let ((rhs-insts (if (literal-p rhs)
+                         `((movlw ,rhs))
+                         `((movf ,rhs :w)))))
+      (let ((then1 (emit dest then))
+            (else1 (emit dest else)))
+        (destructuring-bind (else-lbl end-lbl) (genlbl "ELSE" "END")
+          (cl-pattern:match dest
+            ((:non-tail _) `(,@rhs-insts
+                             (subwf ,lhs :w)
+                             (btfsc :status :z)
+                             (goto ,else-lbl)
+                             ,@then1
+                             (goto ,end-lbl)
+                             ,else-lbl
+                             ,@else1
+                             ,end-lbl))
+            (:tail `(,@rhs-insts
+                     (subwf ,lhs :w)
+                     (btfsc :status :z)
+                     (goto ,else-lbl)
+                     ,@then1
+                     ,else-lbl
+                     ,@else1))
+            (_ (error "The value ~S is an invalid destination." dest))))))))
 
 (defun emit-setreg (dest inst)
   (let ((reg (setreg-inst-reg inst))
         (expr (setreg-inst-expr inst)))
-    (cl-pattern:match dest
-      ((:non-tail _) `((movf ,expr :w)
-                       (movwf ,reg)))
-      (:tail `((movf ,expr :w)
-               (movwf ,reg)
-               (return)))
-      (_ (error "The value ~S is an invalid destination." dest)))))
+    (let ((expr-insts (if (literal-p expr)
+                          (if (= expr 0)
+                              `((clrf ,reg))
+                              `((movlw ,expr)
+                                (movwf ,reg)))
+                          `((movf ,expr :w)
+                            (movwf ,reg)))))
+      (cl-pattern:match dest
+        ((:non-tail _) `(,@expr-insts))
+        (:tail `(,@expr-insts
+                 (return)))
+        (_ (error "The value ~S is an invalid destination." dest))))))
 
 (defun emit-call (dest inst)
   (let ((name (call-inst-name inst))
         (operands (call-inst-operands inst)))
     (let ((ireg-insts (loop for operand in operands
                             for ireg in (input-regs (length operands))
-                         append `((movf ,operand :w)
-                                  (movwf ,ireg)))))
+                         append (if (literal-p operand)
+                                    `((movlw ,operand)
+                                      (movwf ,ireg))
+                                    `((movf ,operand :w)
+                                      (movwf ,ireg))))))
       (cl-pattern:match dest
         ((:non-tail reg) `(,@ireg-insts
                            (call ,name)
@@ -1519,14 +1639,15 @@
   (output
    (emit :tail
     (assign (empty-register-environment) nil
-     (virtual
-      (closure
-       (flatten
-        (beta (empty-beta-environment)
-         (alpha2 (empty-alpha2-environment)
-          (alpha1 (empty-alpha1-environment)
-           (k-normal
-            (expand form))))))))))))
+     (immediates (empty-immediates-environment)
+      (virtual
+       (closure
+        (flatten
+         (beta (empty-beta-environment)
+          (alpha2 (empty-alpha2-environment)
+           (alpha1 (empty-alpha1-environment)
+            (k-normal
+             (expand form)))))))))))))
 
 (defun expand-pic (form)
   (expand form))
