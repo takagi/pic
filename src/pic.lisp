@@ -1458,7 +1458,8 @@
         (args (letrec-inst-args inst))
         (expr (letrec-inst-expr inst))
         (body (letrec-inst-body inst)))
-    (let* ((env0 (register-environment-assign-list args cont
+    (let* ((cont1 (list expr))
+           (env0 (register-environment-assign-list args cont1
                   (empty-register-environment)))
            (args1 (mapcar #'(lambda (arg)
                               (register-environment-lookup arg env0))
@@ -1567,8 +1568,10 @@
         (body (letrec-inst-body inst)))
     (let ((args1 (loop for arg in args
                        for ireg in (input-regs (length args))
-                    append `((movf ,ireg :w)
-                             (movwf ,arg))))
+                    append (if (input-reg-p arg)
+                               nil
+                               `((movf ,ireg :w)
+                                 (movwf ,arg)))))
           (expr1 (emit :tail expr))
           (body1 (emit dest body)))
       `(,@body1
