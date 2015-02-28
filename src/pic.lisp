@@ -1680,9 +1680,13 @@
   (virtual
    (closure-pic form)))
 
+(defun immediates-pic (form)
+  (immediates (empty-immediates-environment)
+    (virtual-pic form)))
+
 (defun assign-pic (form)
   (assign (empty-register-environment) nil
-   (virtual-pic form)))
+   (immediates-pic form)))
 
 (defun emit-pic (form)
   (emit :tail
