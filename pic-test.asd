@@ -12,7 +12,7 @@
   :author "Masayuki Takagi"
   :license "MIT"
   :depends-on (:pic
-               :cl-test-more)
+               :prove)
   :components ((:module "t"
                 :components
                 ((:file "pic"))))

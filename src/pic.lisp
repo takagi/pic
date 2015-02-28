@@ -36,6 +36,10 @@
 ;;; Utilities
 ;;;
 
+(defun singlep (object)
+  (and (consp object)
+       (null (cdr object))))
+
 (defun flatten-list (x)
   (labels ((rec (x acc)
              (cond ((null x) acc)
@@ -1286,42 +1290,125 @@
 ;;; Register assignment
 ;;;
 
+(defun input-regs (n)
+  (loop for i from 0 below n
+     collect
+       (make-keyword (format nil "I~A" i))))
+
+(defun input-reg-p (object)
+  (and (pic-reg-p object)
+       (member object (input-regs 8))
+       t))
+
+(defun local-regs (n)
+  (loop for i from 0 below n
+     collect
+       (make-keyword (format nil "L~A" i))))
+
+(defun local-reg-p (object)
+  (and (pic-reg-p object)
+       (member object (local-regs 8))
+       t))
+
 (defun empty-register-environment ()
-  '(:l0 nil :l1 nil :l2 nil :l3 nil
-    :l4 nil :l5 nil :l6 nil :l7 nil))
+  nil)
+
+(defun register-environment-plist (env)
+  (loop for lreg in (local-regs 8)
+     append
+       (let ((var (caar (member lreg env :key #'cdr))))
+         (list lreg var))))
 
 (defun register-environment-assign (var cont env)
   (if (register-environment-exists-p var env)
       env
-      (let ((reg (register-environment-empty-register env)))
+      (let ((reg (register-environment-input-register var cont)))
         (if reg
             (register-environment-assign% reg var env)
-            (let ((reg (register-environment-dead-register cont env)))
+            (let ((reg (register-environment-empty-register env)))
               (if reg
                   (register-environment-assign% reg var env)
-                  (error "There is no available register.")))))))
+                  (let ((reg (register-environment-dead-register cont env)))
+                    (if reg
+                        (register-environment-assign% reg var env)
+                        (error "There is no available register.")))))))))
 
 (defun register-environment-assign% (reg var env)
-  (loop for (reg1 var1) on env by #'cddr
-     if (eq reg reg1)
-     append `(,reg ,var)
-     else
-     append `(,reg1 ,var1)))
+  (acons var reg
+    (remove var env :key #'car)))
+
+(defun register-environment-input-register (var cont)
+  (let ((cont1 (car cont)))
+    (multiple-value-bind (iregs call-found-p cont-p)
+        (register-environment-input-register% var nil cont1)
+      (declare (ignore call-found-p))
+      (if (and (singlep iregs) (not cont-p))
+          (car iregs)
+          nil))))
+
+(defun register-environment-input-register% (var cont form)
+  (assert (not (letrec-inst-p form)))
+  (cond
+    ((let-inst-p form) (register-environment-input-register-let var cont form))
+    ((set-inst-p form) (register-environment-input-register-default))
+    ((mov-inst-p form) (register-environment-input-register-default))
+    ((sub-inst-p form) (register-environment-input-register-default))
+    ((ifeq-inst-p form) (register-environment-input-register-ifeq var cont form))
+    ((setreg-inst-p form) (register-environment-input-register-default))
+    ((call-inst-p form) (register-environment-input-register-call var cont form))
+    (t (error "The value ~S is an invalid form." form))))
+
+(defun register-environment-input-register-let (var cont form)
+  (let ((expr (let-inst-expr form))
+        (body (let-inst-body form)))
+    (let ((cont1 (cons body cont)))
+      (multiple-value-bind (iregs1 call-found-p1 cont-p1)
+          (register-environment-input-register% var cont1 expr)
+        (if call-found-p1
+            (values iregs1 t cont-p1)
+            (register-environment-input-register% var cont body))))))
+
+(defun register-environment-input-register-ifeq (var cont form)
+  (let ((then (ifeq-inst-then form))
+        (else (ifeq-inst-else form)))
+    (multiple-value-bind (iregs1 call-found-p1 cont-p1)
+        (register-environment-input-register% var cont then)
+      (multiple-value-bind (iregs2 call-found-p2 cont-p2)
+          (register-environment-input-register% var cont else)
+        (values (union iregs1 iregs2)
+                (or call-found-p1 call-found-p2)
+                (or cont-p1 cont-p2))))))
+
+(defun register-environment-input-register-call (var cont form)
+  (let ((operands (call-inst-operands form)))
+    (let ((iregs (loop for operand in operands
+                    for ireg in (input-regs (length operands))
+                    if (eq var operand)
+                    collect ireg))
+          (cont-p (and (member var (flatten-list cont))
+                       t)))
+      (values iregs t cont-p))))
+
+(defun register-environment-input-register-default ()
+  (values nil nil nil))
 
 (defun register-environment-empty-register (env)
-  (loop for (reg var) on env by #'cddr
-     if (null var)
-     return reg))
+  (let ((env1 (register-environment-plist env)))
+    (loop for (reg var) on env1 by #'cddr
+       if (null var)
+       return reg)))
 
 (defun register-environment-dead-register (cont env)
-  (loop for (reg var) on env by #'cddr
-     if (not (member var (flatten-list cont)))
-     return reg))
+  (let ((env1 (register-environment-plist env)))
+    (loop for (reg var) on env1 by #'cddr
+       if (not (member var (flatten-list cont)))
+       return reg)))
 
 (defun register-environment-alive-registers (cont env)
-  (loop for (reg var) on env by #'cddr
-     if (member var (flatten-list cont))
-     collect reg))
+  (let ((env1 (register-environment-plist env)))
+    (loop for (reg var) on env1 by #'cddr
+       if (member var (flatten-list cont))
+       collect reg)))
 
 (defun register-environment-assign-list (vars cont env)
   (if vars
@@ -1331,16 +1418,13 @@
       env))
 
 (defun register-environment-exists-p (var env)
-  (loop for (reg var1) on env by #'cddr
-     if (eq var var1)
-     return t))
+  (and (cdr (assoc var env))
+       t))
 
 (defun register-environment-lookup (var env)
   (if (pic-reg-p var)
       var
-      (or (loop for (reg var1) on env by #'cddr
-             if (eq var var1)
-             return reg)
+      (or (cdr (assoc var env))
           (error "The variable ~S not found." var))))
 
 (defun assign (env cont inst)
@@ -1454,11 +1538,6 @@
                        (symbolicate thing cnt))
                    things)
       (incf *label-counter*))))
-
-(defun input-regs (n)
-  (loop for i from 0 below n
-     collect
-       (make-keyword (format nil "I~A" i))))
 
 (defun emit (dest inst)
   (cond
@@ -1582,11 +1661,12 @@
         (operands (call-inst-operands inst)))
     (let ((ireg-insts (loop for operand in operands
                             for ireg in (input-regs (length operands))
-                         append (if (literal-p operand)
-                                    `((movlw ,operand)
-                                      (movwf ,ireg))
-                                    `((movf ,operand :w)
-                                      (movwf ,ireg))))))
+                         append (cond
+                                  ((literal-p operand) `((movlw ,operand)
+                                                         (movwf ,ireg)))
+                                  ((input-reg-p operand) nil)
+                                  (t `((movf ,operand :w)
+                                       (movwf ,ireg)))))))
       (cl-pattern:match dest
         ((:non-tail reg) `(,@ireg-insts
                            (call ,name)
