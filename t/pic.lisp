@@ -14,6 +14,15 @@
 
 
 ;;;
+;;; Immediates optimization
+;;;
+
+(is (pic::immediates (pic::empty-immediates-environment) '(let ((x (pic::set 1)))
+                                                           (pic::mov x)))
+    `(pic::set 1))
+
+
+;;;
 ;;; Register assignment
 ;;;
 

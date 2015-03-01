@@ -1210,7 +1210,7 @@
     ((let-inst-p inst) (immediates-let env inst))
     ((letrec-inst-p inst) (immediates-letrec env inst))
     ((set-inst-p inst) (immediates-set inst))
-    ((mov-inst-p inst) (immediates-mov inst))
+    ((mov-inst-p inst) (immediates-mov env inst))
     ((sub-inst-p inst) (immediates-sub env inst))
     ((ifeq-inst-p inst) (immediates-ifeq env inst))
     ((setreg-inst-p inst) (immediates-setreg env inst))
@@ -1248,8 +1248,12 @@
 (defun immediates-set (inst)
   inst)
 
-(defun immediates-mov (inst)
-  inst)
+(defun immediates-mov (env inst)
+  (let ((reg (mov-inst-reg inst)))
+    (let ((literal (immediates-environment-lookup reg env)))
+      (if literal
+          `(set ,literal)
+          `(mov ,reg)))))
 
 (defun immediates-sub (env inst)
   (let ((expr1 (sub-inst-expr1 inst))
