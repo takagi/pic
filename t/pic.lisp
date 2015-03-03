@@ -61,5 +61,32 @@
                                                      (pic::mov x))))
     :I0)
 
+(is (pic::register-environment-input-register 'x '((loop 5
+                                                     (pic::call foo x))))
+    nil
+    "Variables used for function call parameters in LOOP instructions are not assigned to input registers.")
+
+(let ((form '(let ((tmp0 (set 1)))
+               (loop tmp0
+                 (let ((tmp1 (set 1)))
+                   (loop tmp1
+                     (let ((tmp2 (set 1)))
+                       (loop tmp2
+                         (let ((tmp3 (set 1)))
+                           (loop tmp3
+                             (let ((tmp4 (set 1)))
+                               (loop tmp4
+                                 (let ((tmp5 (set 1)))
+                                   (loop tmp5
+                                     (let ((tmp6 (set 1)))
+                                       (loop tmp6
+                                         (let ((tmp7 (set 1)))
+                                           (loop tmp7
+                                             (let ((tmp8 (set 1)))
+                                               tmp8)))))))))))))))))))
+  (is-error (pic::assign (pic::empty-register-environment) nil form)
+            'simple-error
+            "LOOP instructions keep couter registers in their scope."))
+
 
 (finalize)

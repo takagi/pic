@@ -10,8 +10,8 @@
 ;;;
 
 (defpic mdelay1 ()
-  (loop 90                              ; 90 is a magic number to delay
-    0))                                 ;  for 1 msec
+  (loop #xf8                            ; 0xF8 is a magic number to delay
+    (nop)))                             ;   for 1 msec
 
 (defpicmacro mdelay (n)
   (unless (<= 0 n 65535)

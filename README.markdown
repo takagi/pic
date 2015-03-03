@@ -28,7 +28,7 @@ Following is an example of LED blinking with PIC12F683 micro controller. `init` 
         (main)))                            ; repeat
 
     (defpic mdelay1 ()
-      (loop 90                              ; 90 is a magic number to delay
+      (loop #xf8                            ; 0xF8 is a magic number to delay
         0))                                 ;  for 1 msec
 
     (defpicmacro mdelay (n)
@@ -50,6 +50,7 @@ Then `pic-compile` function compiles and outputs the complete assembly for the P
         CBLOCK  020h
         L0,L1,L2,L3,L4,L5,L6,L7 ; local registers
         I0,I1,I2,I3,I4,I5,I6,I7 ; input registers
+        NULL                    ; null registers
         SP,STMP,STK             ; stack registers
         ENDC
     
@@ -125,6 +126,7 @@ The compiler has the following syntax.
 * variable reference
 * local function definitions
 * function applications
+* loop
 * writing to registers
 
 #### Literal
@@ -170,6 +172,12 @@ Locally defines a function. It can be called recursively. Making closures and ha
 
 Calls a function which is defined with `defpic` macro or a local function definition. Tail calls are compiled into `GOTO` instruction, not `CALL` instruction.
 
+#### Loop
+
+    (loop 42 (do-something))
+
+Releatedly executes the body part for the specified times.
+
 #### Writing to registers
 
     (setreg :gpio #x20)
@@ -199,24 +207,13 @@ Sequentially evaluates the given expressions. Actually they are expanded into a 
         (let ((tmp (setreg :gpio #x02)))
           (setreg :gpio #x03))))
 
-#### [PIC-Macro] loop
+#### [PIC-Macro] nop
 
-    LOOP n expression
+    NOP
 
-Processes `expression` for `n` times. Actually a loop form is expanded into a local function definition and its recursive call. Loop facility may be redesigned as a syntax to be compiled into prefarable assembly, using `DECFSZ` instruction.
+Consumes a instruction cycle.
 
-    (loop 10
-      (do-something))
-
-    ==>
-
-    (let ((_loop (i)
-            (if (= i 0)
-              (progn
-                (do-something)
-                (_loop (- i 1)))
-              0)))
-      (_loop 10))
+    (nop) ==> (setreg :null #x00)
 
 #### [PIC-Macro] setbank0
 

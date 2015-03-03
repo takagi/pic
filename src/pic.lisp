@@ -212,6 +212,23 @@
     (('with-args . _) (error "The form ~S is malformed." form))
     (_ (error "The value ~S is an invalid form." form))))
 
+(defun loop-p (object)
+  (cl-pattern:match object
+    (('loop . _) t)
+    (_ nil)))
+
+(defun loop-times (form)
+  (cl-pattern:match form
+    (('loop times _) times)
+    (('loop . _) (error "The form ~S is malformed." form))
+    (_ (error "The value ~S is an invalid form." form))))
+
+(defun loop-body (form)
+  (cl-pattern:match form
+    (('loop _ body) body)
+    (('loop . _) (error "The form ~S is malformed." form))
+    (_ (error "The value ~S is an invalid form." form))))
+
 (defun setreg-p (object)
   (cl-pattern:match object
     (('setreg . _) t)
@@ -394,6 +411,15 @@
     (('ifeq . _) (error "The form ~S is malformed." form))
     (_ (error "The value ~S is an invalid form." form))))
 
+(defun loop-inst-p (object)
+  (loop-p object))
+
+(defun loop-inst-var (form)
+  (loop-times form))
+
+(defun loop-inst-body (form)
+  (loop-body form))
+
 (defun call-inst-p (object)
   (cl-pattern:match object
     (('call . _) t)
@@ -475,6 +501,7 @@
     ((let-p form) (expand-let form))
     ((letrec-p form) (expand-letrec form))
     ((with-args-p form) (expand-with-args form))
+    ((loop-p form) (expand-loop form))
     ((setreg-p form) (expand-setreg form))
     ((apply-p form) (expand-apply form))
     (t (expand-default form))))
@@ -538,6 +565,14 @@
       `(with-args ,args
          ,body1))))
 
+(defun expand-loop (form)
+  (let ((times (loop-times form))
+        (body (loop-body form)))
+    (let ((times1 (expand times))
+          (body1 (expand body)))
+      `(loop ,times1
+         ,body1))))
+
 (defun expand-setreg (form)
   (let ((reg (setreg-reg form))
         (expr (setreg-expr form)))
@@ -564,6 +599,7 @@
     ((let-p form) (k-normal-let form))
     ((letrec-p form) (k-normal-letrec form))
     ((with-args-p form) (k-normal-with-args form))
+    ((loop-p form) (k-normal-loop form))
     ((setreg-p form) (k-normal-setreg form))    
     ((apply-p form) (k-normal-apply form))
     (t (error "The value ~S is an invalid form." form))))
@@ -623,6 +659,15 @@
     (let ((body1 (k-normal body)))
       `(with-args ,args ,body1))))
 
+(defun k-normal-loop (form)
+  (let ((times (loop-times form))
+        (body (loop-body form)))
+    (let ((times1 (k-normal times))
+          (body1 (k-normal body)))
+      `(let ((tmp ,times1))
+         (loop tmp
+           ,body1)))))
+
 (defun k-normal-apply (form)
   (let ((operator (apply-operator form))
         (operands (apply-operands form)))
@@ -680,6 +725,7 @@
     ((let-p form) (alpha1-let env form))
     ((letrec-p form) (alpha1-letrec env form))
     ((with-args-p form) (alpha1-with-args env form))
+    ((loop-p form) (alpha1-loop env form))
     ((setreg-p form) (alpha1-setreg env form))
     ((apply-p form) (alpha1-apply env form))
     (t (error "The value ~S is an invalid form." form))))
@@ -743,7 +789,15 @@
                           args)))
       (let ((body1 (alpha1 env1 body)))
         `(with-args ,args1 ,body1)))))
-      
+
+(defun alpha1-loop (env form)
+  (let ((times (loop-times form))
+        (body (loop-body form)))
+    (let ((times1 (alpha1 env times))
+          (body1 (alpha1 env body)))
+      `(loop ,times1
+         ,body1))))
+
 (defun alpha1-setreg (env form)
   (let ((reg (setreg-reg form))
         (expr (setreg-expr form)))
@@ -782,6 +836,7 @@
     ((let-p form) (alpha2-let env form))
     ((letrec-p form) (alpha2-letrec env form))
     ((with-args-p form) (alpha2-with-args env form))
+    ((loop-p form) (alpha2-loop env form))
     ((setreg-p form) (alpha2-setreg env form))
     ((apply-p form) (alpha2-apply env form))
     (t (error "The value ~S is an invalid form." form))))
@@ -837,6 +892,14 @@
     (let ((body1 (alpha2 env body)))
       `(with-args ,args ,body1))))
 
+(defun alpha2-loop (env form)
+  (let ((times (loop-times form))
+        (body (loop-body form)))
+    (let ((times1 (alpha2 env times))
+          (body1 (alpha2 env body)))
+      `(loop ,times1
+         ,body1))))
+
 (defun alpha2-setreg (env form)
   (let ((reg (setreg-reg form))
         (expr (setreg-expr form)))
@@ -873,6 +936,7 @@
     ((let-p form) (beta-let env form))
     ((letrec-p form) (beta-letrec env form))
     ((with-args-p form) (beta-with-args env form))
+    ((loop-p form) (beta-loop env form))
     ((setreg-p form) (beta-setreg env form))
     ((apply-p form) (beta-apply env form))
     (t (error "The value ~S is an invalid form." form))))
@@ -930,6 +994,14 @@
     (let ((body1 (beta env body)))
       `(with-args ,args ,body1))))
 
+(defun beta-loop (env form)
+  (let ((times (loop-times form))
+        (body (loop-body form)))
+    (let ((times1 (beta env times))
+          (body1 (beta env body)))
+      `(loop ,times1
+         ,body1))))
+
 (defun beta-setreg (env form)
   (let ((reg (setreg-reg form))
         (expr (setreg-expr form)))
@@ -958,6 +1030,7 @@
     ((let-p form) (flatten-let form))
     ((letrec-p form) (flatten-letrec form))
     ((with-args-p form) (flatten-with-args form))
+    ((loop-p form) (flatten-loop form))
     ((setreg-p form) (flatten-setreg form))
     ((apply-p form) (flatten-apply form))
     (t (error "The value ~S is an invalid form." form))))
@@ -1012,6 +1085,13 @@
     (let ((body1 (flatten body)))
       `(with-args ,args ,body1))))
 
+(defun flatten-loop (form)
+  (let ((times (loop-times form))
+        (body (loop-body form)))
+    (let ((body1 (flatten body)))
+      `(loop ,times
+         ,body1))))
+
 (defun flatten-setreg (form)
   form)
 
@@ -1045,6 +1125,7 @@
     ((let-p form) (closure-let form fundefs))
     ((letrec-p form) (closure-letrec form fundefs))
     ((with-args-p form) (closure-with-args form fundefs))
+    ((loop-p form) (closure-loop form fundefs))
     ((setreg-p form) (closure-setreg form fundefs))
     ((apply-p form) (closure-apply form fundefs))
     (t (error "The value ~S is an invalid form." form))))
@@ -1094,6 +1175,13 @@
       (values `(with-args ,args ,body1)
               fundefs1))))
 
+(defun closure-loop (form fundefs)
+  (let ((times (loop-times form))
+        (body (loop-body form)))
+    (multiple-value-bind (body1 fundefs1) (closure% body fundefs)
+      (values `(loop ,times ,body1)
+              fundefs1))))
+
 (defun closure-setreg (form fundefs)
   (values form fundefs))
 
@@ -1114,6 +1202,7 @@
     ((let-p form) (virtual-let form))
     ((letrec-p form) (virtual-letrec form))
     ((with-args-p form) (virtual-with-args form))
+    ((loop-p form) (virtual-loop form))
     ((setreg-p form) (virtual-setreg form))
     ((apply-p form) (virtual-apply form))
     (t (error "The value ~S is an invalid form." form))))
@@ -1167,6 +1256,13 @@
     (let ((iregs (input-regs (length args))))
       (virtual-with-args% args iregs body))))
 
+(defun virtual-loop (form)
+  (let ((times (loop-times form))
+        (body (loop-body form)))
+    (assert (pic-symbol-p times))
+    (let ((body1 (virtual body)))
+      `(loop ,times ,body1))))
+
 (defun virtual-with-args% (args iregs body)
   (if args
       (destructuring-bind (arg . args1) args
@@ -1213,6 +1309,7 @@
     ((mov-inst-p inst) (immediates-mov env inst))
     ((sub-inst-p inst) (immediates-sub env inst))
     ((ifeq-inst-p inst) (immediates-ifeq env inst))
+    ((loop-inst-p inst) (immediates-loop env inst))
     ((setreg-inst-p inst) (immediates-setreg env inst))
     ((call-inst-p inst) (immediates-call env inst))
     (t (error "The value ~S is an invalid instruction." inst))))
@@ -1272,6 +1369,12 @@
           (then1 (immediates env then))
           (else1 (immediates env else)))
       `(ifeq ,lhs ,rhs1 ,then1 ,else1))))
+
+(defun immediates-loop (env inst)
+  (let ((var (loop-inst-var inst))
+        (body (loop-inst-body inst)))
+    (let ((body1 (immediates env body)))
+      `(loop ,var ,body1))))
 
 (defun immediates-setreg (env inst)
   (let ((reg (setreg-inst-reg inst))
@@ -1358,6 +1461,7 @@
     ((mov-inst-p form) (register-environment-input-register-default))
     ((sub-inst-p form) (register-environment-input-register-default))
     ((ifeq-inst-p form) (register-environment-input-register-ifeq var cont form))
+    ((loop-inst-p form) (register-environment-input-register-loop var cont form))
     ((setreg-inst-p form) (register-environment-input-register-default))
     ((call-inst-p form) (register-environment-input-register-call var cont form))
     (t (error "The value ~S is an invalid form." form))))
@@ -1382,6 +1486,14 @@
         (values (union iregs1 iregs2)
                 (or call-found-p1 call-found-p2)
                 (or cont-p1 cont-p2))))))
+
+(defun register-environment-input-register-loop (var cont form)
+  (let ((body (loop-inst-body form)))
+    (multiple-value-bind (iregs call-found-p cont-p)
+        (register-environment-input-register% var cont body)
+      (if iregs
+          (values iregs call-found-p t)
+          (values iregs call-found-p cont-p)))))
 
 (defun register-environment-input-register-call (var cont form)
   (let ((operands (call-inst-operands form)))
@@ -1439,6 +1551,7 @@
     ((mov-inst-p inst) (assign-mov env inst))
     ((sub-inst-p inst) (assign-sub env inst))
     ((ifeq-inst-p inst) (assign-ifeq env cont inst))
+    ((loop-inst-p inst) (assign-loop env cont inst))
     ((setreg-inst-p inst) (assign-setreg env inst))
     ((call-inst-p inst) (assign-call env cont inst))
     (t (error "The value ~S is an invalid instruction." inst))))
@@ -1505,6 +1618,15 @@
         (multiple-value-bind (else1 env2) (assign env1 cont else)
           (values `(ifeq ,lhs1 ,rhs1 ,then1 ,else1) env2))))))
 
+(defun assign-loop (env cont inst)
+  (let ((var (loop-inst-var inst))
+        (body (loop-inst-body inst)))
+    (let ((var1 (register-environment-lookup var env))
+          ;; add loop continuation for keeping the loop register alive
+          (cont1 (cons `(loop ,var) cont)))
+      (multiple-value-bind (body1 env1) (assign env cont1 body)
+        (values `(loop ,var1 ,body1) env1)))))
+
 (defun assign-setreg (env inst)
   (let ((reg (setreg-inst-reg inst))
         (expr (setreg-inst-expr inst)))
@@ -1539,10 +1661,13 @@
 
 (defun genlbl (&rest things)
   (let ((cnt (princ-to-string *label-counter*)))
-    (prog1 (mapcar #'(lambda (thing)
-                       (symbolicate thing cnt))
-                   things)
-      (incf *label-counter*))))
+    (if (singlep things)
+        (prog1 (symbolicate (car things) cnt)
+          (incf *label-counter*))
+        (prog1 (mapcar #'(lambda (thing)
+                           (symbolicate thing cnt))
+                       things)
+          (incf *label-counter*)))))
 
 (defun emit (dest inst)
   (cond
@@ -1552,6 +1677,7 @@
     ((mov-inst-p inst) (emit-mov dest inst))
     ((sub-inst-p inst) (emit-sub dest inst))
     ((ifeq-inst-p inst) (emit-ifeq dest inst))
+    ((loop-inst-p inst) (emit-loop dest inst))
     ((setreg-p inst) (emit-setreg dest inst))
     ((call-inst-p inst) (emit-call dest inst))
     ((with-save-inst-p inst) (emit-with-save dest inst))
@@ -1586,16 +1712,19 @@
 (defun emit-set (dest inst)
   (let ((literal (set-inst-literal inst)))
     (cl-pattern:match dest
-      ((:non-tail reg) (if (= literal 0)
-                           `((clrf ,reg))
-                           `((movlw ,literal)
-                             (movwf ,reg))))
+      ((:non-tail reg)
+       (cond
+         ((eq :null reg) nil)
+         ((= literal 0) `((clrf ,reg)))
+         (t `((movlw ,literal)
+              (movwf ,reg)))))
       (:tail `((retlw ,literal)))
       (_ (error "The value ~S is an invalid destination." dest)))))
 
 (defun emit-mov (dest inst)
   (let ((reg (mov-inst-reg inst)))
     (cl-pattern:match dest
+      ((:non-tial :null) nil)
       ((:non-tail reg1) `((movf ,reg :w)
                           (movwf ,reg1)))
       (:tail `((movf ,reg :w)
@@ -1609,6 +1738,7 @@
                            `((movlw ,expr2))
                            `((movf ,expr2 :w)))))
       (cl-pattern:match dest
+        ((:non-tail :null) nil)
         ((:non-tail reg) `(,@expr2-insts
                            (subwf ,expr1 :w)
                            (movwf ,reg)))
@@ -1647,6 +1777,23 @@
                      ,@else1))
             (_ (error "The value ~S is an invalid destination." dest))))))))
 
+(defun emit-loop (dest inst)
+  (let ((reg (loop-inst-var inst))
+        (body (loop-inst-body inst)))
+    (let ((loop-lbl (genlbl "LOOP"))
+          (body-insts (emit '(:non-tail :null) body)))
+      (cl-pattern:match dest
+        ((:non-tail _) `(,loop-lbl
+                         ,@body-insts
+                         (decfsz ,reg :f)
+                         (goto ,loop-lbl)))
+        (:tail `(,loop-lbl
+                 ,@body-insts
+                 (decfsz ,reg :f)
+                 (goto ,loop-lbl)
+                 (retlw 0)))
+        (_ (error "The value ~S is an invalid destination." dest))))))
+
 (defun emit-setreg (dest inst)
   (let ((reg (setreg-inst-reg inst))
         (expr (setreg-inst-expr inst)))
@@ -1675,6 +1822,8 @@
                                   (t `((movf ,operand :w)
                                        (movwf ,ireg)))))))
       (cl-pattern:match dest
+        ((:non-tail :null) `(,@ireg-insts
+                             (call ,name)))
         ((:non-tail reg) `(,@ireg-insts
                            (call ,name)
                            (movwf ,reg)))
@@ -1880,6 +2029,7 @@
   (write-line "        CBLOCK  020h" stream)
   (write-line "        L0,L1,L2,L3,L4,L5,L6,L7 ; local registers" stream)
   (write-line "        I0,I1,I2,I3,I4,I5,I6,I7 ; input registers" stream)
+  (write-line "        NULL                    ; null registers" stream)
   (write-line "        SP,STMP,STK             ; stack registers" stream)
   (write-line "        ENDC" stream)
   (write-line "" stream)
@@ -1990,14 +2140,8 @@
                    form))))
     (aux forms)))
 
-(defpicmacro loop (n body)
-  `(let ((_loop (i)
-           (if (= i 0)
-               (progn
-                 ,body
-                 (_loop (- i 1)))
-               0)))
-     (_loop ,n)))
+(defpicmacro nop ()
+  '(setreg :null 0))
 
 (defpicmacro setbank0 ()
   '(setreg :status #x20))
