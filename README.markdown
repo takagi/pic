@@ -276,7 +276,7 @@ Optional. `intr` is called when an interruption occurs. It must have no argument
 
 ### Overview
 
-The host language is a The host language is a pretty small subset of ML-like language and the target language is 8-bit PIC micro controller assembly. Common Lisp is the compiler language. Overall design of the compiler is based on [MinCaml](http://esumii.github.io/min-caml/).
+The host language is a pretty small subset of ML-like language and the target language is 8-bit PIC micro controller assembly. Common Lisp is the compiler language. Overall design of the compiler is based on [MinCaml](http://esumii.github.io/min-caml/).
 
 ### Calling convention
 
