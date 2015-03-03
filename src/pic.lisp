@@ -1339,7 +1339,7 @@
 
 (defun register-environment-assign% (reg var env)
   (acons var reg
-    (remove var env :key #'car)))
+    (remove reg env :key #'cdr)))
 
 (defun register-environment-input-register (var cont)
   (let ((cont1 (car cont)))
