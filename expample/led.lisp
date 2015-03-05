@@ -13,13 +13,29 @@
   (loop #xf8                            ; 0xF8 is a magic number to delay
     (nop)))                             ;   for 1 msec
 
+(defpicmacro with-mdelay1 (body)
+  `(let ((mdelay1 ()                    ; define MDELAY1 locally to be inlined
+           (loop #xf8
+             (nop))))
+     ,body))
+
+;; (defpicmacro mdelay (n)
+;;   (unless (<= 0 n 65535)
+;;     (error "The value ~S is invalid." n))
+;;   (multiple-value-bind (q r) (truncate n 256)
+;;     (if (= q 0)
+;;         `(loop ,r (mdelay1))
+;;         `(loop ,q (loop ,r (mdelay1))))))
+
 (defpicmacro mdelay (n)
   (unless (<= 0 n 65535)
     (error "The value ~S is invalid." n))
   (multiple-value-bind (q r) (truncate n 256)
     (if (= q 0)
-        `(loop ,r (mdelay1))
-        `(loop ,q (loop ,r (mdelay1))))))
+        `(with-mdelay1
+           (loop ,r (mdelay1)))
+        `(with-mdelay1
+           (loop ,q (loop ,r (mdelay1)))))))
 
 (defpic init ()
   (progn

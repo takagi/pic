@@ -590,105 +590,127 @@
 ;;; K-normalization
 ;;;
 
-(defun k-normal (form)
+(defun empty-k-normal-environment ()
+  nil)
+
+(defun k-normal-environment-add (var env)
+  (cons var env))
+
+(defun k-normal-environment-add-list (vars env)
+  (if vars
+      (destructuring-bind (var . rest) vars
+        (k-normal-environment-add-list rest
+         (k-normal-environment-add var env)))
+      env))
+
+(defun k-normal-environment-exists-p (var env)
+  (and (member var env)
+       t))
+
+(defun k-normal (env form)
   (cond
     ((literal-p form) (k-normal-literal form))
-    ((reference-p form) (k-normal-reference form))
-    ((sub-p form) (k-normal-sub form))
-    ((ifeq-p form) (k-normal-ifeq form))
-    ((let-p form) (k-normal-let form))
-    ((letrec-p form) (k-normal-letrec form))
-    ((with-args-p form) (k-normal-with-args form))
-    ((loop-p form) (k-normal-loop form))
-    ((setreg-p form) (k-normal-setreg form))    
-    ((apply-p form) (k-normal-apply form))
+    ((reference-p form) (k-normal-reference env form))
+    ((sub-p form) (k-normal-sub env form))
+    ((ifeq-p form) (k-normal-ifeq env form))
+    ((let-p form) (k-normal-let env form))
+    ((letrec-p form) (k-normal-letrec env form))
+    ((with-args-p form) (k-normal-with-args env form))
+    ((loop-p form) (k-normal-loop env form))
+    ((setreg-p form) (k-normal-setreg env form))
+    ((apply-p form) (k-normal-apply env form))
     (t (error "The value ~S is an invalid form." form))))
 
 (defun k-normal-literal (form)
   form)
 
-(defun k-normal-reference (form)
-  form)
+(defun k-normal-reference (env form)
+  (if (k-normal-environment-exists-p form env)
+      form
+      (error "The variable ~S not found." form)))
 
-(defun k-normal-sub (form)
+(defun k-normal-sub (env form)
   (let ((expr1 (sub-expr1 form))
         (expr2 (sub-expr2 form)))
-    (let ((expr1% (k-normal expr1))
-          (expr2% (k-normal expr2)))
+    (let ((expr1% (k-normal env expr1))
+          (expr2% (k-normal env expr2)))
       `(let ((tmpa ,expr1%))
          (let ((tmpb ,expr2%))
            (- tmpa tmpb))))))
 
-(defun k-normal-ifeq (form)
+(defun k-normal-ifeq (env form)
   (let ((lhs (ifeq-lhs form))
         (rhs (ifeq-rhs form))
         (then (ifeq-then form))
         (else (ifeq-else form)))
-    (let ((lhs1 (k-normal lhs))
-          (rhs1 (k-normal rhs))
-          (then1 (k-normal then))
-          (else1 (k-normal else)))
+    (let ((lhs1 (k-normal env lhs))
+          (rhs1 (k-normal env rhs))
+          (then1 (k-normal env then))
+          (else1 (k-normal env else)))
       `(let ((tmpa ,lhs1))
          (let ((tmpb ,rhs1))
            (if (= tmpa tmpb)
                ,then1
                ,else1))))))
 
-(defun k-normal-let (form)
+(defun k-normal-let (env form)
   (let ((var (let-var form))
         (expr (let-expr form))
         (body (let-body form)))
-    (let ((expr1 (k-normal expr))
-          (body1 (k-normal body)))
-      `(let ((,var ,expr1))
-         ,body1))))
+    (let ((env1 (k-normal-environment-add var env)))
+      (let ((expr1 (k-normal env expr))
+            (body1 (k-normal env1 body)))
+        `(let ((,var ,expr1))
+           ,body1)))))
 
-(defun k-normal-letrec (form)
+(defun k-normal-letrec (env form)
   (let ((name (letrec-name form))
         (args (letrec-args form))
         (expr (letrec-expr form))
         (body (letrec-body form)))
-    (let ((expr1 (k-normal expr))
-          (body1 (k-normal body)))
-      `(let ((,name ,args ,expr1))
-         ,body1))))
+    (let ((env1 (k-normal-environment-add-list args
+                 (empty-k-normal-environment))))
+      (let ((expr1 (k-normal env1 expr))
+            (body1 (k-normal env body)))
+        `(let ((,name ,args ,expr1))
+           ,body1)))))
 
-(defun k-normal-with-args (form)
+(defun k-normal-with-args (env form)
   (let ((args (with-args-args form))
         (body (with-args-body form)))
-    (let ((body1 (k-normal body)))
+    (let ((body1 (k-normal env body)))
       `(with-args ,args ,body1))))
 
-(defun k-normal-loop (form)
+(defun k-normal-loop (env form)
   (let ((times (loop-times form))
         (body (loop-body form)))
-    (let ((times1 (k-normal times))
-          (body1 (k-normal body)))
+    (let ((times1 (k-normal env times))
+          (body1 (k-normal env body)))
       `(let ((tmp ,times1))
          (loop tmp
            ,body1)))))
 
-(defun k-normal-apply (form)
-  (let ((operator (apply-operator form))
-        (operands (apply-operands form)))
-    (k-normal-apply% operator operands 0 nil)))
-
-(defun k-normal-setreg (form)
+(defun k-normal-setreg (env form)
     (let ((reg (setreg-reg form))
         (expr (setreg-expr form)))
-    (let ((expr1 (k-normal expr)))
+    (let ((expr1 (k-normal env expr)))
       `(let ((tmp ,expr1))
          (setreg ,reg tmp)))))
 
-(defun k-normal-apply% (operator operands i tmps)
+(defun k-normal-apply (env form)
+  (let ((operator (apply-operator form))
+        (operands (apply-operands form)))
+    (k-normal-apply% env operator operands 0 nil)))
+
+(defun k-normal-apply% (env operator operands i tmps)
   (if operands
       (let ((operand (car operands))
             (rest (cdr operands)))
-        (let ((operand1 (k-normal operand)))
+        (let ((operand1 (k-normal env operand)))
           (let* ((tmp (tmp-var i))
                  (tmps (cons tmp tmps)))
             `(let ((,tmp ,operand1))
-               ,(k-normal-apply% operator rest (1+ i) tmps)))))
+               ,(k-normal-apply% env operator rest (1+ i) tmps)))))
       `(,operator ,@(nreverse tmps))))
 
 (defun tmp-var (i)
@@ -714,7 +736,7 @@
 
 (defun alpha1-environment-lookup (var env)
   (or (cdr (assoc var env))
-      (error "The variable ~S not found." var)))
+      var))
 
 (defun alpha1 (env form)
   (cond
@@ -1097,6 +1119,109 @@
 
 (defun flatten-apply (form)
   form)
+
+
+;;;
+;;; Inlining
+;;;
+
+(defun empty-inlined-environment ()
+  nil)
+
+(defun inlined-environment-add (name args expr env)
+  (acons name (list args expr) env))
+
+(defun inlined-environment-lookup (name env)
+  (cdr (assoc name env)))
+
+(defun inlined (env form)
+  (cond
+    ((literal-p form) (inlined-literal form))
+    ((reference-p form) (inlined-reference form))
+    ((sub-p form) (inlined-sub form))
+    ((ifeq-p form) (inlined-ifeq env form))
+    ((let-p form) (inlined-let env form))
+    ((letrec-p form) (inlined-letrec env form))
+    ((with-args-p form) (inlined-with-args env form))
+    ((loop-p form) (inlined-loop env form))
+    ((setreg-p form) (inlined-setreg form))
+    ((apply-p form) (inlined-apply env form))
+    (t (error "The value ~S is an invalid form." form))))
+
+(defun inlined-literal (form)
+  form)
+
+(defun inlined-reference (form)
+  form)
+
+(defun inlined-sub (form)
+  form)
+
+(defun inlined-ifeq (env form)
+  (let ((lhs (ifeq-lhs form))
+        (rhs (ifeq-rhs form))
+        (then (ifeq-then form))
+        (else (ifeq-else form)))
+    (let ((then1 (inlined env then))
+          (else1 (inlined env else)))
+      `(if (= ,lhs ,rhs) ,then1 ,else1))))
+
+(defun inlined-let (env form)
+  (let ((var (let-var form))
+        (expr (let-expr form))
+        (body (let-body form)))
+    (let ((expr1 (inlined env expr))
+          (body1 (inlined env body)))
+      `(let ((,var ,expr1))
+         ,body1))))
+
+(defun inlined-letrec (env form)
+  (let ((name (letrec-name form))
+        (args (letrec-args form))
+        (expr (letrec-expr form))
+        (body (letrec-body form)))
+    (let ((env1 (inlined-environment-add name args expr env)))
+      (let ((expr1 (inlined env expr))  ; not inlining self-recursion
+            (body1 (inlined env1 body)))
+        `(let ((,name ,args ,expr1))
+           ,body1)))))
+
+(defun inlined-with-args (env form)
+  (let ((args (with-args-args form))
+        (body (with-args-body form)))
+    (let ((body1 (inlined env body)))
+      `(with-args ,args
+         ,body1))))
+
+(defun inlined-loop (env form)
+  (let ((times (loop-times form))
+        (body (loop-body form)))
+    (let ((body1 (inlined env body)))
+      `(loop ,times
+         ,body1))))
+
+(defun inlined-setreg (form)
+  form)
+
+(defun inlined-apply (env form)
+  (let ((operator (apply-operator form))
+        (operands (apply-operands form)))
+    (let ((inliner (inlined-environment-lookup operator env)))
+      (if inliner
+          (destructuring-bind (args expr) inliner
+            (unless (= (length args) (length operands))
+              (error "Invalid number of arguments: ~S~%" (length operands)))
+            (alpha1 (empty-alpha1-environment)
+             (inlined-apply% args operands expr)))
+          `(,operator ,@operands)))))
+
+(defun inlined-apply% (args operands expr)
+  (if args
+      (destructuring-bind (arg . args1) args
+        (destructuring-bind (operand . operands1) operands
+          `(let ((,arg ,operand))
+             ,(inlined-apply% args1 operands1 expr))))
+      expr))
 
 
 ;;;
@@ -1878,18 +2003,19 @@
      (immediates (empty-immediates-environment)
       (virtual
        (closure
-        (flatten
-         (beta (empty-beta-environment)
-          (alpha2 (empty-alpha2-environment)
-           (alpha1 (empty-alpha1-environment)
-            (k-normal
-             (expand form)))))))))))))
+        (inlined (empty-inlined-environment)
+         (flatten
+          (beta (empty-beta-environment)
+           (alpha2 (empty-alpha2-environment)
+            (alpha1 (empty-alpha1-environment)
+             (k-normal (empty-k-normal-environment)
+              (expand form))))))))))))))
 
 (defun expand-pic (form)
   (expand form))
 
 (defun k-normal-pic (form)
-  (k-normal
+  (k-normal (empty-k-normal-environment)
    (expand-pic form)))
 
 (defun alpha1-pic (form)
@@ -1908,9 +2034,13 @@
   (flatten
    (beta-pic form)))
 
+(defun inlined-pic (form)
+  (inlined (empty-inlined-environment)
+    (flatten-pic form)))
+
 (defun closure-pic (form)
   (closure
-   (flatten-pic form)))
+   (inlined-pic form)))
 
 (defun virtual-pic (form)
   (virtual
@@ -1927,6 +2057,10 @@
 (defun emit-pic (form)
   (emit :tail
    (assign-pic form)))
+
+(defun output-pic (form)
+  (output
+   (emit-pic form)))
 
 
 ;;;
