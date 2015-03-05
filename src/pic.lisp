@@ -2126,12 +2126,6 @@
       (get name 'pic-macro)
       (error "The macro ~S not defined." name)))
 
-(defun program-show (program name)
-  (destructuring-bind (args body insts) (program-by-name program name)
-    (declare (ignore insts))
-    `(defpic ,name ,args
-       ,body)))
-
 (defun program-disassemble (program name)
   (destructuring-bind (args body insts) (program-by-name program name)
     (declare (ignore args body))
