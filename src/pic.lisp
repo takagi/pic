@@ -1247,6 +1247,44 @@
 (defun alive-function-p (name expr)
   (alive-variable-p name expr))
 
+(defun side-effect-p (form)
+  (cond
+    ((literal-p form) nil)
+    ((reference-p form) nil)
+    ((sub-p form) nil)
+    ((ifeq-p form) (side-effect-p-ifeq form))
+    ((let-p form) (side-effect-p-let form))
+    ((letrec-p form) (side-effect-p-letrec form))
+    ((with-args-p form) (side-effect-p-with-args form))
+    ((loop-p form) (side-effect-p-loop form))
+    ((setreg-p form) t)
+    ((apply-p form) t)
+    (t (error "The value ~S is an invalid form." form))))
+
+(defun side-effect-p-ifeq (form)
+  (let ((then (ifeq-then form))
+        (else (ifeq-else form)))
+    (or (side-effect-p then)
+        (side-effect-p else))))
+
+(defun side-effect-p-let (form)
+  (let ((expr (let-expr form))
+        (body (let-body form)))
+    (or (side-effect-p expr)
+        (side-effect-p body))))
+
+(defun side-effect-p-letrec (form)
+  (let ((body (letrec-body form)))
+    (side-effect-p body)))
+
+(defun side-effect-p-with-args (form)
+  (let ((body (with-args-body form)))
+    (side-effect-p body)))
+
+(defun side-effect-p-loop (form)
+  (let ((body (loop-body form)))
+    (side-effect-p body)))
+
 (defun elim (form)
   (cond
     ((literal-p form) (elim-literal form))
@@ -1285,7 +1323,8 @@
         (body (let-body form)))
     (let ((expr1 (elim expr))
           (body1 (elim body)))
-      (if (alive-variable-p var body1)
+      (if (or (side-effect-p expr1)
+              (alive-variable-p var body1))
           `(let ((,var ,expr1))
              ,body1)
           body1))))
