@@ -1237,6 +1237,93 @@
 
 
 ;;;
+;;; Dead code elimination
+;;;
+
+(defun alive-variable-p (var expr)
+  (and (member var (flatten-list expr))
+       t))
+
+(defun alive-function-p (name expr)
+  (alive-variable-p name expr))
+
+(defun elim (form)
+  (cond
+    ((literal-p form) (elim-literal form))
+    ((reference-p form) (elim-reference form))
+    ((sub-p form) (elim-sub form))
+    ((ifeq-p form) (elim-ifeq form))
+    ((let-p form) (elim-let form))
+    ((letrec-p form) (elim-letrec form))
+    ((with-args-p form) (elim-with-args form))
+    ((loop-p form) (elim-loop form))
+    ((setreg-p form) (elim-setreg form))
+    ((apply-p form) (elim-apply form))
+    (t (error "The value ~S is an invalid form." form))))
+
+(defun elim-literal (form)
+  form)
+
+(defun elim-reference (form)
+  form)
+
+(defun elim-sub (form)
+  form)
+
+(defun elim-ifeq (form)
+  (let ((lhs (ifeq-lhs form))
+        (rhs (ifeq-rhs form))
+        (then (ifeq-then form))
+        (else (ifeq-else form)))
+    (let ((then1 (elim then))
+          (else1 (elim else)))
+      `(if (= ,lhs ,rhs) ,then1 ,else1))))
+
+(defun elim-let (form)
+  (let ((var (let-var form))
+        (expr (let-expr form))
+        (body (let-body form)))
+    (let ((expr1 (elim expr))
+          (body1 (elim body)))
+      (if (alive-variable-p var body1)
+          `(let ((,var ,expr1))
+             ,body1)
+          body1))))
+
+(defun elim-letrec (form)
+  (let ((name (letrec-name form))
+        (args (letrec-args form))
+        (expr (letrec-expr form))
+        (body (letrec-body form)))
+    (let ((expr1 (elim expr))
+          (body1 (elim body)))
+      (if (alive-function-p name body1)
+          `(let ((,name ,args ,expr1))
+             ,body1)
+          body1))))
+
+(defun elim-with-args (form)
+  (let ((args (with-args-args form))
+        (body (with-args-body form)))
+    (let ((body1 (elim body)))
+      `(with-args ,args
+         ,body1))))
+
+(defun elim-loop (form)
+  (let ((times (loop-times form))
+        (body (loop-body form)))
+    (let ((body1 (elim body)))
+      `(loop ,times
+          ,body1))))
+
+(defun elim-setreg (form)
+  form)
+
+(defun elim-apply (form)
+  form)
+
+
+;;;
 ;;; Closure conversion
 ;;;
 
@@ -1433,10 +1520,6 @@
 
 (defun immediates-environment-lookup (var env)
   (cdr (assoc var env)))
-
-(defun alive-variable-p (var expr)
-  (and (member var (flatten-list expr))
-       t))
 
 (defun immediates (env inst)
   (cond
@@ -2015,13 +2098,14 @@
      (immediates (empty-immediates-environment)
       (virtual
        (closure
-        (inlined fundefs
-         (flatten
-          (beta (empty-beta-environment)
-           (alpha2 (empty-alpha2-environment)
-            (alpha1 (empty-alpha1-environment)
-             (k-normal (empty-k-normal-environment)
-              (expand form))))))))))))))
+        (elim
+         (inlined fundefs
+          (flatten
+           (beta (empty-beta-environment)
+            (alpha2 (empty-alpha2-environment)
+             (alpha1 (empty-alpha1-environment)
+              (k-normal (empty-k-normal-environment)
+               (expand form)))))))))))))))
 
 (defun expand-pic (form)
   (expand form))
@@ -2053,9 +2137,13 @@
   (inlined (empty-inlined-environment)
     (flatten-pic form)))
 
+(defun elim-pic (form)
+  (elim
+   (inlined-pic form)))
+
 (defun closure-pic (form)
   (closure
-   (inlined-pic form)))
+   (elim-pic form)))
 
 (defun virtual-pic (form)
   (virtual
@@ -2144,6 +2232,18 @@
 (defun program-by-name (program name)
   (or (values (gethash name program))
       (error "The function ~S not defined." name)))
+
+(defun program-function-alive-p (program name)
+  (if (member name '(init main intr))
+      t
+      (and (some #'(lambda (name1)
+                     (destructuring-bind (args body body1 insts)
+                         (program-by-name program name1)
+                       (declare (ignore args body body1))
+                       (and (not (eq name name1))
+                            (search (compile-token name) insts))))
+                 (program-names program))
+           t)))
 
 (defun program-macro-exists-p (name)
   (and (symbolp name)
@@ -2239,8 +2339,10 @@
 
 (defun output-functions (program stream)
   (loop for name in (program-names program)
-     unless (member name '(main intr))
-     do (destructuring-bind (args body body1 insts) (program-by-name program name)
+     when (and (not (member name '(main intr)))
+               (program-function-alive-p program name))
+     do (destructuring-bind (args body body1 insts)
+            (program-by-name program name)
           (declare (ignore args body body1))
           (princ insts stream))))
 
