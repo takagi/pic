@@ -2130,6 +2130,16 @@
 ;;; Compilation
 ;;;
 
+(defun repeatedly (limit fun form)
+  (if (= limit 0)
+      form
+      (let ((form1 (funcall fun form)))
+        (if (equal form form1)
+            form1
+            (repeatedly (1- limit) fun form1)))))
+
+(defvar *limit* 1000)
+
 (defun compile-pic (form fundefs)
   (output
    (emit :tail
@@ -2137,14 +2147,16 @@
      (immediates (empty-immediates-environment)
       (virtual
        (closure
-        (elim
-         (inlined fundefs
-          (flatten
-           (beta (empty-beta-environment)
-            (alpha2 (empty-alpha2-environment)
-             (alpha1 (empty-alpha1-environment)
-              (k-normal (empty-k-normal-environment)
-               (expand form)))))))))))))))
+        (repeatedly *limit*
+          #'(lambda (form)
+              (elim
+               (inlined fundefs
+                (flatten
+                 (beta (empty-beta-environment) form)))))
+          (alpha2 (empty-alpha2-environment)
+           (alpha1 (empty-alpha1-environment)
+            (k-normal (empty-k-normal-environment)
+             (expand form))))))))))))
 
 (defun expand-pic (form)
   (expand form))
@@ -2172,37 +2184,43 @@
   (flatten
    (beta-pic form)))
 
-(defun inlined-pic (form)
-  (inlined (empty-inlined-environment)
+(defun inlined-pic (form fundefs)
+  (inlined fundefs
     (flatten-pic form)))
 
-(defun elim-pic (form)
+(defun elim-pic (form fundefs)
   (elim
-   (inlined-pic form)))
+   (inlined-pic form fundefs)))
 
-(defun closure-pic (form)
+(defun closure-pic (form fundefs)
   (closure
-   (elim-pic form)))
+   (repeatedly *limit*
+     #'(lambda (form)
+         (elim
+          (inlined fundefs
+           (flatten
+            (beta (empty-beta-environment) form)))))
+     (alpha2-pic form))))
 
-(defun virtual-pic (form)
+(defun virtual-pic (form fundefs)
   (virtual
-   (closure-pic form)))
+   (closure-pic form fundefs)))
 
-(defun immediates-pic (form)
+(defun immediates-pic (form fundefs)
   (immediates (empty-immediates-environment)
-    (virtual-pic form)))
+    (virtual-pic form fundefs)))
 
-(defun assign-pic (form)
+(defun assign-pic (form fundefs)
   (assign (empty-register-environment) nil
-   (immediates-pic form)))
+   (immediates-pic form fundefs)))
 
-(defun emit-pic (form)
+(defun emit-pic (form fundefs)
   (emit :tail
-   (assign-pic form)))
+   (assign-pic form fundefs)))
 
-(defun output-pic (form)
+(defun output-pic (form fundefs)
   (output
-   (emit-pic form)))
+   (emit-pic form fundefs)))
 
 
 ;;;
