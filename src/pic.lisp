@@ -1131,10 +1131,22 @@
 (defun inlined-environment-add (name args expr env)
   (acons name (list args expr) env))
 
+(defun inlined-environment-add-fundefs (fundefs env)
+  (if fundefs
+      (destructuring-bind ((name args body1) . rest) fundefs
+        (inlined-environment-add-fundefs rest
+         (inlined-environment-add name args body1 env)))
+      env))
+
 (defun inlined-environment-lookup (name env)
   (cdr (assoc name env)))
 
-(defun inlined (env form)
+(defun inlined (fundefs form)
+  (let* ((env (inlined-environment-add-fundefs fundefs
+               (empty-inlined-environment))))
+    (inlined% env form)))
+
+(defun inlined% (env form)
   (cond
     ((literal-p form) (inlined-literal form))
     ((reference-p form) (inlined-reference form))
@@ -1162,16 +1174,16 @@
         (rhs (ifeq-rhs form))
         (then (ifeq-then form))
         (else (ifeq-else form)))
-    (let ((then1 (inlined env then))
-          (else1 (inlined env else)))
+    (let ((then1 (inlined% env then))
+          (else1 (inlined% env else)))
       `(if (= ,lhs ,rhs) ,then1 ,else1))))
 
 (defun inlined-let (env form)
   (let ((var (let-var form))
         (expr (let-expr form))
         (body (let-body form)))
-    (let ((expr1 (inlined env expr))
-          (body1 (inlined env body)))
+    (let ((expr1 (inlined% env expr))
+          (body1 (inlined% env body)))
       `(let ((,var ,expr1))
          ,body1))))
 
@@ -1181,22 +1193,22 @@
         (expr (letrec-expr form))
         (body (letrec-body form)))
     (let ((env1 (inlined-environment-add name args expr env)))
-      (let ((expr1 (inlined env expr))  ; not inlining self-recursion
-            (body1 (inlined env1 body)))
+      (let ((expr1 (inlined% env expr))  ; not inlining self-recursion
+            (body1 (inlined% env1 body)))
         `(let ((,name ,args ,expr1))
            ,body1)))))
 
 (defun inlined-with-args (env form)
   (let ((args (with-args-args form))
         (body (with-args-body form)))
-    (let ((body1 (inlined env body)))
+    (let ((body1 (inlined% env body)))
       `(with-args ,args
          ,body1))))
 
 (defun inlined-loop (env form)
   (let ((times (loop-times form))
         (body (loop-body form)))
-    (let ((body1 (inlined env body)))
+    (let ((body1 (inlined% env body)))
       `(loop ,times
          ,body1))))
 
@@ -1996,14 +2008,14 @@
 ;;; Compilation
 ;;;
 
-(defun compile-pic (form)
+(defun compile-pic (form fundefs)
   (output
    (emit :tail
     (assign (empty-register-environment) nil
      (immediates (empty-immediates-environment)
       (virtual
        (closure
-        (inlined (empty-inlined-environment)
+        (inlined fundefs
          (flatten
           (beta (empty-beta-environment)
            (alpha2 (empty-alpha2-environment)
@@ -2025,6 +2037,9 @@
 (defun alpha2-pic (form)
   (alpha2 (empty-alpha2-environment)
    (alpha1-pic form)))
+
+(defun alpha-pic (form)
+  (alpha2-pic form))
 
 (defun beta-pic (form)
   (beta (empty-beta-environment)
@@ -2087,18 +2102,22 @@
   (when (eq name 'intr)
     (unless (null args)
       (error "The intrrupt function must have no arguments.")))
-  (let ((insts (with-output-to-string (s)
-                 (let ((*standard-output* s))
-                   (cond
-                     ((eq name 'main) (write-line "_MAIN")
-                                      (compile-pic body))
-                     ((eq name 'init) (write-line "_INIT")
-                                      (compile-pic body))
-                     ((eq name 'intr) (write-line "_INTR")
-                                      (compile-pic body))
-                     (t (write-line (compile-token name) s)
-                        (compile-pic `(with-args ,args ,body))))))))
-    (setf (gethash name program) (list args body insts))
+  (let* ((fundefs (program-fundefs-excluding program name))
+         (body1 (if (member name '(main init intr))
+                    (flatten-pic body)
+                    (flatten-pic `(with-args ,args ,body))))
+         (insts (with-output-to-string (s)
+                  (let ((*standard-output* s))
+                    (cond
+                      ((eq name 'main) (write-line "_MAIN")
+                                       (compile-pic body fundefs))
+                      ((eq name 'init) (write-line "_INIT")
+                                       (compile-pic body fundefs))
+                      ((eq name 'intr) (write-line "_INTR")
+                                       (compile-pic body fundefs))
+                      (t (write-line (compile-token name) s)
+                         (compile-pic `(with-args ,args ,body) fundefs)))))))
+    (setf (gethash name program) (list args body body1 insts))
     name))
 
 (defun program-defmacro (name expander)
@@ -2107,6 +2126,16 @@
 
 (defun program-names (program)
   (hash-table-keys program))
+
+(defun program-fundefs (program)
+  (loop for name in (program-names program)
+     collect
+       (destructuring-bind (args body body1 insts) (program-by-name program name)
+         (declare (ignore body insts))
+         (list name args body1))))
+
+(defun program-fundefs-excluding (program name)
+  (remove name (program-fundefs program) :key #'car))
 
 (defun program-exists-p (program name)
   (and (gethash name program)
@@ -2127,8 +2156,8 @@
       (error "The macro ~S not defined." name)))
 
 (defun program-disassemble (program name)
-  (destructuring-bind (args body insts) (program-by-name program name)
-    (declare (ignore args body))
+  (destructuring-bind (args body body1 insts) (program-by-name program name)
+    (declare (ignore args body body1))
     (princ insts)
     (values)))
 
@@ -2194,15 +2223,15 @@
   (values))
 
 (defun output-main (program stream)
-  (destructuring-bind (args body insts) (program-main program)
-    (declare (ignore args body))
+  (destructuring-bind (args body body1 insts) (program-main program)
+    (declare (ignore args body body1))
     (princ insts stream)))
 
 (defun output-intr (program stream)
   (let ((intr (program-intr program)))
     (if intr
-        (destructuring-bind (args body insts) intr
-          (declare (ignore args body))
+        (destructuring-bind (args body body1 insts) intr
+          (declare (ignore args body body1))
           (princ insts stream))
         (progn
           (write-line "_INTR" stream)
@@ -2211,8 +2240,8 @@
 (defun output-functions (program stream)
   (loop for name in (program-names program)
      unless (member name '(main intr))
-     do (destructuring-bind (args body insts) (program-by-name program name)
-          (declare (ignore args body))
+     do (destructuring-bind (args body body1 insts) (program-by-name program name)
+          (declare (ignore args body body1))
           (princ insts stream))))
 
 
