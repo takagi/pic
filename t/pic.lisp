@@ -14,6 +14,19 @@
 
 
 ;;;
+;;; K-normalization
+;;;
+
+(is (pic::k-normal (pic::empty-k-normal-environment) '(pic::with-args (x y)
+                                                        (- x y)))
+    '(pic::with-args (x y)
+       (let ((pic::tmpa x))
+         (let ((pic::tmpb y))
+           (- pic::tmpa pic::tmpb))))
+    "K-normalization for WITH-ARGS form.")
+
+
+;;;
 ;;; Immediates optimization
 ;;;
 

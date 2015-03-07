@@ -678,7 +678,8 @@
 (defun k-normal-with-args (env form)
   (let ((args (with-args-args form))
         (body (with-args-body form)))
-    (let ((body1 (k-normal env body)))
+    (let* ((env1 (k-normal-environment-add-list args env))
+           (body1 (k-normal env1 body)))
       `(with-args ,args ,body1))))
 
 (defun k-normal-loop (env form)
