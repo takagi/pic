@@ -2297,17 +2297,24 @@
   (or (values (gethash name program))
       (error "The function ~S not defined." name)))
 
-(defun program-function-alive-p (program name)
-  (if (member name '(init main intr))
-      t
-      (and (some #'(lambda (name1)
-                     (destructuring-bind (args body body1 insts)
-                         (program-by-name program name1)
-                       (declare (ignore args body body1))
-                       (and (not (eq name name1))
-                            (search (compile-token name) insts))))
-                 (program-names program))
-           t)))
+(defun program-compute-dependency (program)
+  (remove-duplicates
+   (append
+    (program-compute-dependency% program 'init)
+    (program-compute-dependency% program 'main)
+    (program-compute-dependency% program 'intr))))
+
+(defun program-compute-dependency% (program name)
+  (if (program-exists-p program name)
+      (destructuring-bind (args body insts) (program-by-name program name)
+        (declare (ignore args body))
+        (remove-duplicates
+         (loop for name1 in (program-names program)
+            if (and (not (eq name name1))
+                    (search (compile-token name1) insts))
+            append (cons name1
+                         (compute-dependency program name1)))))
+      nil))
 
 (defun program-macro-exists-p (name)
   (and (symbolp name)
@@ -2402,9 +2409,7 @@
           (write-line "        RETURN" stream)))))
 
 (defun output-functions (program stream)
-  (loop for name in (program-names program)
-     when (and (not (member name '(init main intr)))
-               (program-function-alive-p program name))
+  (loop for name in (program-compute-dependency program)
      do (destructuring-bind (args body insts)
             (program-by-name program name)
           (declare (ignore args body))
