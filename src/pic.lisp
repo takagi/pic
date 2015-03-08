@@ -1134,9 +1134,9 @@
 
 (defun inlined-environment-add-fundefs (fundefs env)
   (if fundefs
-      (destructuring-bind ((name args body1) . rest) fundefs
+      (destructuring-bind ((name args body) . rest) fundefs
         (inlined-environment-add-fundefs rest
-         (inlined-environment-add name args body1 env)))
+         (inlined-environment-add name args body env)))
       env))
 
 (defun inlined-environment-lookup (name env)
@@ -1151,13 +1151,13 @@
   (cond
     ((literal-p form) (inlined-literal form))
     ((reference-p form) (inlined-reference form))
-    ((sub-p form) (inlined-sub form))
+    ((sub-p form) (inlined-sub env form))
     ((ifeq-p form) (inlined-ifeq env form))
     ((let-p form) (inlined-let env form))
     ((letrec-p form) (inlined-letrec env form))
     ((with-args-p form) (inlined-with-args env form))
     ((loop-p form) (inlined-loop env form))
-    ((setreg-p form) (inlined-setreg form))
+    ((setreg-p form) (inlined-setreg env form))
     ((apply-p form) (inlined-apply env form))
     (t (error "The value ~S is an invalid form." form))))
 
@@ -1167,17 +1167,25 @@
 (defun inlined-reference (form)
   form)
 
-(defun inlined-sub (form)
-  form)
+(defun inlined-sub (env form)
+  (let ((expr1 (sub-expr1 form))
+        (expr2 (sub-expr2 form)))
+    (let ((expr1% (inlined% env expr1))
+          (expr2% (inlined% env expr2)))
+      `(- ,expr1% ,expr2%))))
 
 (defun inlined-ifeq (env form)
   (let ((lhs (ifeq-lhs form))
         (rhs (ifeq-rhs form))
         (then (ifeq-then form))
         (else (ifeq-else form)))
-    (let ((then1 (inlined% env then))
+    (let ((lhs1 (inlined% env lhs))
+          (rhs1 (inlined% env rhs))
+          (then1 (inlined% env then))
           (else1 (inlined% env else)))
-      `(if (= ,lhs ,rhs) ,then1 ,else1))))
+      `(if (= ,lhs1 ,rhs1)
+           ,then1
+           ,else1))))
 
 (defun inlined-let (env form)
   (let ((var (let-var form))
@@ -1194,7 +1202,7 @@
         (expr (letrec-expr form))
         (body (letrec-body form)))
     (let ((env1 (inlined-environment-add name args expr env)))
-      (let ((expr1 (inlined% env expr))  ; not inlining self-recursion
+      (let ((expr1 (inlined% env expr)) ; use ENV not inlining self-recursion
             (body1 (inlined% env1 body)))
         `(let ((,name ,args ,expr1))
            ,body1)))))
@@ -1213,28 +1221,31 @@
       `(loop ,times
          ,body1))))
 
-(defun inlined-setreg (form)
-  form)
+(defun inlined-setreg (env form)
+  (let ((reg (setreg-reg form))
+        (expr (setreg-expr form)))
+    (let ((expr1 (inlined% env expr)))
+      `(setreg ,reg ,expr1))))
 
 (defun inlined-apply (env form)
   (let ((operator (apply-operator form))
         (operands (apply-operands form)))
     (let ((inliner (inlined-environment-lookup operator env)))
       (if inliner
-          (destructuring-bind (args expr) inliner
+          (destructuring-bind (args body) inliner
             (unless (= (length args) (length operands))
               (error "Invalid number of arguments: ~S~%" (length operands)))
-            (alpha1 (empty-alpha1-environment)
-             (inlined-apply% args operands expr)))
+            (inlined-apply% env args operands body))
           `(,operator ,@operands)))))
 
-(defun inlined-apply% (args operands expr)
+(defun inlined-apply% (env args operands body)
   (if args
       (destructuring-bind (arg . args1) args
         (destructuring-bind (operand . operands1) operands
-          `(let ((,arg ,operand))
-             ,(inlined-apply% args1 operands1 expr))))
-      expr))
+          (let ((operand1 (inlined% env operand)))
+            `(let ((,arg ,operand1))
+               ,(inlined-apply% env args1 operands1 body)))))
+      body))
 
 
 ;;;
@@ -2151,43 +2162,41 @@
         (repeatedly *limit*
           #'(lambda (form)
               (elim
-               (inlined fundefs
-                (flatten
-                 (beta (empty-beta-environment) form)))))
+               (flatten
+                (beta (empty-beta-environment) form))))
           (alpha2 (empty-alpha2-environment)
            (alpha1 (empty-alpha1-environment)
             (k-normal (empty-k-normal-environment)
-             (expand form))))))))))))
+             (repeatedly *limit*
+               #'(lambda (form)
+                   (inlined fundefs form))
+               (expand form)))))))))))))
 
 (defun expand-pic (form)
   (expand form))
 
-(defun k-normal-pic (form)
-  (k-normal (empty-k-normal-environment)
-   (expand-pic form)))
-
-(defun alpha1-pic (form)
-  (alpha1 (empty-alpha1-environment)
-   (k-normal-pic form)))
-
-(defun alpha2-pic (form)
-  (alpha2 (empty-alpha2-environment)
-   (alpha1-pic form)))
-
-(defun alpha-pic (form)
-  (alpha2-pic form))
-
-(defun beta-pic (form)
-  (beta (empty-beta-environment)
-   (alpha2-pic form)))
-
-(defun flatten-pic (form)
-  (flatten
-   (beta-pic form)))
-
 (defun inlined-pic (form fundefs)
-  (inlined fundefs
-    (flatten-pic form)))
+  (repeatedly *limit*
+    #'(lambda (form)
+        (inlined fundefs form))
+    (expand-pic form)))
+
+(defun k-normal-pic (form fundefs)
+  (k-normal (empty-k-normal-environment)
+   (inlined-pic form fundefs)))
+
+(defun alpha-pic (form fundefs)
+  (alpha2 (empty-alpha2-environment)
+   (alpha1 (empty-alpha1-environment)
+     (k-normal-pic form fundefs))))
+
+(defun beta-pic (form fundefs)
+  (beta (empty-beta-environment)
+   (alpha-pic form fundefs)))
+
+(defun flatten-pic (form fundefs)
+  (flatten
+   (beta-pic form fundefs)))
 
 (defun elim-pic (form fundefs)
   (elim
@@ -2198,10 +2207,9 @@
    (repeatedly *limit*
      #'(lambda (form)
          (elim
-          (inlined fundefs
-           (flatten
-            (beta (empty-beta-environment) form)))))
-     (alpha2-pic form))))
+          (flatten
+           (beta (empty-beta-environment) form))))
+     (alpha-pic form fundefs))))
 
 (defun virtual-pic (form fundefs)
   (virtual
@@ -2249,9 +2257,6 @@
     (unless (null args)
       (error "The intrrupt function must have no arguments.")))
   (let* ((fundefs (program-fundefs-excluding program name))
-         (body1 (if (member name '(main init intr))
-                    (flatten-pic body)
-                    (flatten-pic `(with-args ,args ,body))))
          (insts (with-output-to-string (s)
                   (let ((*standard-output* s))
                     (cond
@@ -2263,7 +2268,7 @@
                                        (compile-pic body fundefs))
                       (t (write-line (compile-token name) s)
                          (compile-pic `(with-args ,args ,body) fundefs)))))))
-    (setf (gethash name program) (list args body body1 insts))
+    (setf (gethash name program) (list args body insts))
     name))
 
 (defun program-defmacro (name expander)
@@ -2276,9 +2281,10 @@
 (defun program-fundefs (program)
   (loop for name in (program-names program)
      collect
-       (destructuring-bind (args body body1 insts) (program-by-name program name)
-         (declare (ignore body insts))
-         (list name args body1))))
+       (destructuring-bind (args body insts) (program-by-name program name)
+         (declare (ignore insts))
+         (let ((body1 (expand body)))
+           (list name args body1)))))
 
 (defun program-fundefs-excluding (program name)
   (remove name (program-fundefs program) :key #'car))
@@ -2314,8 +2320,8 @@
       (error "The macro ~S not defined." name)))
 
 (defun program-disassemble (program name)
-  (destructuring-bind (args body body1 insts) (program-by-name program name)
-    (declare (ignore args body body1))
+  (destructuring-bind (args body insts) (program-by-name program name)
+    (declare (ignore args body))
     (princ insts)
     (values)))
 
@@ -2381,15 +2387,15 @@
   (values))
 
 (defun output-main (program stream)
-  (destructuring-bind (args body body1 insts) (program-main program)
-    (declare (ignore args body body1))
+  (destructuring-bind (args body insts) (program-main program)
+    (declare (ignore args body))
     (princ insts stream)))
 
 (defun output-intr (program stream)
   (let ((intr (program-intr program)))
     (if intr
-        (destructuring-bind (args body body1 insts) intr
-          (declare (ignore args body body1))
+        (destructuring-bind (args body insts) intr
+          (declare (ignore args body))
           (princ insts stream))
         (progn
           (write-line "_INTR" stream)
@@ -2397,11 +2403,11 @@
 
 (defun output-functions (program stream)
   (loop for name in (program-names program)
-     when (and (not (member name '(main intr)))
+     when (and (not (member name '(init main intr)))
                (program-function-alive-p program name))
-     do (destructuring-bind (args body body1 insts)
+     do (destructuring-bind (args body insts)
             (program-by-name program name)
-          (declare (ignore args body body1))
+          (declare (ignore args body))
           (princ insts stream))))
 
 
