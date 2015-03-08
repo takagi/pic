@@ -14,8 +14,7 @@
     (nop)))                             ;   for 1 msec
 
 (defpicmacro mdelay (n)
-  (unless (<= 0 n 65535)
-    (error "The value ~S is invalid." n))
+  (check-type n (unsigned-byte 16))
   (multiple-value-bind (q r) (truncate n 256)
     (if (= q 0)
         `(loop ,r (mdelay1))
