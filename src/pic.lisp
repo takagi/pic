@@ -2357,7 +2357,7 @@
   (write-line "        CBLOCK  020h" stream)
   (write-line "        L0,L1,L2,L3,L4,L5,L6,L7 ; local registers" stream)
   (write-line "        I0,I1,I2,I3,I4,I5,I6,I7 ; input registers" stream)
-  (write-line "        NULL                    ; null register" stream)
+  (write-line "        NULL                    ; null register (for NOP)" stream)
   (write-line "        SP,STMP,STK             ; stack registers" stream)
   (write-line "        ENDC" stream)
   (write-line "" stream)
