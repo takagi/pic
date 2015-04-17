@@ -454,11 +454,6 @@
     (('with-save . _) (error "The form ~S is malformed." form))
     (_ (error "The value ~S is an invalid form." form))))
 
-(defun save-inst-regs (form)
-  (cl-pattern:match form
-    (('save . regs) regs)
-    (_ (error "The value ~S is an invalid form." form))))
-
 (defun restore-inst-p (object)
   (cl-pattern:match object
     (('restore . _) t)
