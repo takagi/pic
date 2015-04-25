@@ -16,9 +16,13 @@
 (defpicmacro mdelay (n)
   (check-type n (unsigned-byte 16))
   (multiple-value-bind (q r) (truncate n 256)
-    (if (= q 0)
-        `(loop ,r (mdelay1))
-        `(loop ,q (loop ,r (mdelay1))))))
+    (cond
+      ((and (> q 0) (> r 0)) `(progn
+                               (loop ,q (loop 0 (mdelay1)))
+                               (loop ,r (mdelay1))))
+      ((> q 0) `(loop ,q (loop 0 (mdelay1))))
+      ((> r 0) `(loop ,r (mdelay1)))
+      (t '(nop)))))
 
 (defpic init ()
   (progn
