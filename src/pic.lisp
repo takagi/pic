@@ -2478,7 +2478,7 @@
   '(setreg :null 0))
 
 (defpicmacro setbank0 ()
-  '(setreg :status #x20))
+  '(setreg :status #x00))
 
 (defpicmacro setbank1 ()
-  '(setreg :status #x00))
+  '(setreg :status #x20))
