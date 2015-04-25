@@ -2308,7 +2308,7 @@
             if (and (not (eq name name1))
                     (search (compile-token name1) insts))
             append (cons name1
-                         (compute-dependency program name1)))))
+                         (program-compute-dependency% program name1)))))
       nil))
 
 (defun program-macro-exists-p (name)
@@ -2337,7 +2337,7 @@
   (program-by-name program 'main))
 
 (defun program-init (program)
-  (values (gethash 'intr program)))
+  (values (gethash 'init program)))
 
 (defun program-intr (program)
   (values (gethash 'intr program)))
@@ -2362,6 +2362,7 @@
   (write-line "        GOTO    INTR" stream)
   (output-functions program stream)
   (output-intr program stream)
+  (output-init program stream)
   (output-main program stream)
   (write-line "_PUSH_STACK" stream)
   (write-line "        MOVWF   STMP" stream)
@@ -2387,6 +2388,16 @@
   (write-line "        CALL    _MAIN" stream)
   (write-line "        END" stream)
   (values))
+
+(defun output-init (program stream)
+  (let ((init (program-init program)))
+    (if init
+        (destructuring-bind (args body insts) init
+          (declare (ignore args body))
+          (princ insts stream))
+        (progn
+          (write-line "_INIT" stream)
+          (write-line "        RETURN" stream)))))
 
 (defun output-main (program stream)
   (destructuring-bind (args body insts) (program-main program)
